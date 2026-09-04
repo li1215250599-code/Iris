@@ -2,6 +2,14 @@
 
 > 规则：以后每项记录日期、Agent、目的、重要文件、验证结果和遗留问题。没有 Git 历史时，不推断作者或确切修改时间。
 
+## 2026-09-04 — Hermes Agent — 头侧片识别改用 DeepSeek 视觉模型
+
+- 目的：解决 Windows OCR 对测量值小数点/负号识别不准的问题。
+- 变更：`iris_server.py` 新增 `call_ceph_vision_ocr`，`/api/ceph-ocr` 改为视觉模型优先（模型取新环境变量 `IRIS_CEPH_MODEL`=`deepseek-v4-flash-vision-exp`，复用原 key/baseUrl），失败自动回退本机 Windows OCR，响应新增 `source` 字段；前端零改动。
+- 业务代码：仅 `iris_server.py`；复诊文字 AI（`IRIS_AI_MODEL`）不受影响。
+- 验证：`py_compile` 通过；合成测量表（含 ANB -5.5、Wits -0.99）经视觉模型逐行识别，正负号/小数全部保留（PASS）。
+- 遗留：真实 E看牙截图版式尚未验证（需医生在重启服务后粘贴实测）；患者图片现会发送至 DeepSeek 服务器（见 DECISIONS D-010，医生已授权）。
+
 ## 2026-09-04 — Hermes Agent — 新增 GitHub Actions 语法门禁
 
 - 目的：任何 Agent 推送/开 PR 时自动执行语法验证，防止提交语法损坏的 `iris_server.py` 或扩展 JS/JSON。
