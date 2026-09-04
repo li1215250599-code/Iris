@@ -1178,7 +1178,7 @@ def call_ceph_vision_ocr(config, image_bytes, suffix):
     )
     body = {
         "model": model,
-        "max_tokens": 800,
+        "max_tokens": 2000,
         "temperature": 0,
         "stream": False,
         "messages": [
@@ -1192,6 +1192,10 @@ def call_ceph_vision_ocr(config, image_bytes, suffix):
             }
         ]
     }
+    if "api.deepseek.com" in base_url:
+        # vision-exp 默认会先思考;若不关闭,思考可能耗尽 max_tokens,
+        # 导致 content 为空(实测空返回均发生在此情形)。关闭后稳定输出。
+        body["thinking"] = {"type": "disabled"}
     request = urllib.request.Request(
         base_url + "/chat/completions",
         data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
@@ -1514,15 +1518,23 @@ class IrisHandler(BaseHTTPRequestHandler):
             if self.path == "/api/ceph-ocr":
                 payload = read_json_body(self)
                 image_bytes, suffix = decode_image_data_url(payload.get("imageData"))
-                source = "windows-ocr"
-                try:
-                    text = call_ceph_vision_ocr(self.config, image_bytes, suffix)
-                    source = "ai-vision"
-                except Exception as exc:
-                    log_event(self.config, f"ceph vision failed, falling back to Windows OCR: {describe_ai_error(exc)}")
-                    text = local_windows_ocr(image_bytes, suffix)
-                log_event(self.config, f"ceph OCR completed source={source} chars={len(text)}")
-                response_json(self, 200, {"ok": True, "text": text, "source": source})
+                # 医生要求(2026-09-04):只使用 AI 视觉模型识别,不再回退 Windows OCR。
+                # 失败自动重试;全部失败则显式报错,绝不静默填入错误数值。
+                text = ""
+                last_error = ""
+                for attempt in range(3):
+                    try:
+                        text = call_ceph_vision_ocr(self.config, image_bytes, suffix)
+                        if text.strip():
+                            break
+                    except Exception as exc:
+                        last_error = describe_ai_error(exc)
+                        log_event(self.config, f"ceph vision attempt {attempt + 1}/3 failed: {last_error}")
+                if not text.strip():
+                    detail = f"（{last_error}）" if last_error else ""
+                    raise RuntimeError(f"AI 视觉识别失败,已停止,请重试或检查网络{detail}")
+                log_event(self.config, f"ceph OCR completed source=ai-vision chars={len(text)}")
+                response_json(self, 200, {"ok": True, "text": text, "source": "ai-vision"})
                 return
             if self.path == "/api/fill":
                 payload = read_json_body(self)

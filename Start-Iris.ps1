@@ -80,7 +80,7 @@ function Resolve-ChromePath {
 }
 
 function Import-IrisUserEnvironment {
-    foreach ($name in @("IRIS_AI_PROVIDER", "IRIS_AI_BASE_URL", "IRIS_AI_MODEL", "IRIS_AI_API_KEY")) {
+    foreach ($name in @("IRIS_AI_PROVIDER", "IRIS_AI_BASE_URL", "IRIS_AI_MODEL", "IRIS_AI_API_KEY", "IRIS_CEPH_MODEL")) {
         $value = [Environment]::GetEnvironmentVariable($name, "User")
         if (-not [string]::IsNullOrWhiteSpace($value)) {
             [Environment]::SetEnvironmentVariable($name, $value, "Process")
