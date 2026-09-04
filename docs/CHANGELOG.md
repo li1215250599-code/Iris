@@ -2,6 +2,14 @@
 
 > 规则：以后每项记录日期、Agent、目的、重要文件、验证结果和遗留问题。没有 Git 历史时，不推断作者或确切修改时间。
 
+## 2026-09-04 — Hermes Agent — 新增 GitHub Actions 语法门禁
+
+- 目的：任何 Agent 推送/开 PR 时自动执行语法验证，防止提交语法损坏的 `iris_server.py` 或扩展 JS/JSON。
+- 变更：新增 `.github/workflows/syntax-check.yml`（py_compile + json.tool + node --check，仅语法检查，不跑业务）。
+- 业务代码：未修改。
+- 验证：推送后 Actions run 结论为 success。
+- 遗留：无自动化行为回归测试；CI 不替代 AGENTS.md 要求的真实 E看牙页面人工验证。
+
 ## 2026-09-04 — Hermes Agent — 核查 GitHub 远端并同步交接文档
 
 - 目的：为多 Agent 延续维护，确认远端仓库真实状态并修正过时的交接信息。
