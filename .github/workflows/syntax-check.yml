@@ -1,0 +1,35 @@
+name: syntax-check
+
+# 每次推送到 main 或打开 PR 时,自动执行 AGENTS.md 中的人工验证命令,
+# 防止任何 Agent 提交语法损坏的文件。不运行业务逻辑、不接触临床数据。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Python syntax check
+        run: python -m py_compile iris_server.py
+
+      - name: JSON validity (terms / manifest)
+        run: |
+          python -m json.tool terms.json > /dev/null
+          python -m json.tool chrome-extension/manifest.json > /dev/null
+
+      - name: Extension JS syntax check
+        run: |
+          node --check chrome-extension/content.js
+          node --check chrome-extension/background.js
