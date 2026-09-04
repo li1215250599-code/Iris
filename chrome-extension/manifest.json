@@ -1,0 +1,37 @@
+{
+  "manifest_version": 3,
+  "name": "Iris E看牙病历助手",
+  "version": "0.1.25",
+  "description": "在 E看牙页面内嵌入 Iris 正畸复诊病历助手。",
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "https://myourhis.myourchina.cn/*",
+    "http://127.0.0.1:9323/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://myourhis.myourchina.cn/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "panel.css"
+      ],
+      "matches": [
+        "https://myourhis.myourchina.cn/*"
+      ]
+    }
+  ]
+}

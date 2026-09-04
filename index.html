@@ -1,0 +1,491 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Iris 正畸复诊病历助手</title>
+    <style>
+      :root {
+        --bg: #f4f7f8;
+        --panel: #ffffff;
+        --ink: #16232b;
+        --muted: #60717c;
+        --line: #d8e2e5;
+        --teal: #167a78;
+        --blue: #2869a6;
+        --coral: #b85c46;
+        --gold: #9a741e;
+        --green: #426f3c;
+        --soft-teal: #e0f2ef;
+        --soft-blue: #e6eff8;
+        --soft-coral: #f9e7e1;
+        --shadow: 0 14px 32px rgba(25, 45, 55, 0.08);
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        color: var(--ink);
+        background: var(--bg);
+        font-family: "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
+      }
+
+      .app {
+        min-height: 100vh;
+        display: grid;
+        grid-template-rows: auto 1fr;
+      }
+
+      header {
+        border-bottom: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.92);
+      }
+
+      .topbar {
+        max-width: 1240px;
+        margin: 0 auto;
+        padding: 18px 22px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+      }
+
+      .brand {
+        display: flex;
+        align-items: baseline;
+        gap: 12px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 24px;
+        line-height: 1.2;
+        letter-spacing: 0;
+      }
+
+      .subtitle {
+        margin: 0;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .status {
+        min-width: 210px;
+        padding: 8px 10px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        color: var(--muted);
+        background: white;
+        font-size: 13px;
+        text-align: right;
+      }
+
+      main {
+        width: 100%;
+        max-width: 1240px;
+        margin: 0 auto;
+        padding: 20px 22px 28px;
+        display: grid;
+        grid-template-columns: minmax(340px, 0.9fr) minmax(420px, 1.1fr);
+        gap: 16px;
+      }
+
+      section {
+        min-width: 0;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel);
+        box-shadow: var(--shadow);
+      }
+
+      .section-head {
+        padding: 16px 18px 12px;
+        border-bottom: 1px solid var(--line);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      h2 {
+        margin: 0;
+        font-size: 18px;
+        letter-spacing: 0;
+      }
+
+      .content {
+        padding: 16px 18px 18px;
+        display: grid;
+        gap: 14px;
+      }
+
+      label {
+        display: block;
+        margin-bottom: 8px;
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      textarea {
+        width: 100%;
+        min-height: 230px;
+        resize: vertical;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 12px;
+        color: var(--ink);
+        font: inherit;
+        line-height: 1.65;
+        outline: none;
+        background: #fbfdfd;
+      }
+
+      textarea:focus {
+        border-color: var(--teal);
+        box-shadow: 0 0 0 3px rgba(22, 122, 120, 0.12);
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+
+      button {
+        appearance: none;
+        border: 1px solid transparent;
+        border-radius: 8px;
+        min-height: 40px;
+        padding: 9px 13px;
+        color: white;
+        background: var(--teal);
+        font: inherit;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      button.secondary {
+        color: var(--ink);
+        background: white;
+        border-color: var(--line);
+      }
+
+      button.blue { background: var(--blue); }
+      button.gold { background: var(--gold); }
+      button.coral { background: var(--coral); }
+      button:disabled {
+        cursor: not-allowed;
+        opacity: 0.45;
+      }
+
+      .preview {
+        display: grid;
+        gap: 12px;
+      }
+
+      .block {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fbfdfd;
+        overflow: hidden;
+      }
+
+      .block h3 {
+        margin: 0;
+        padding: 10px 12px;
+        color: var(--ink);
+        background: var(--soft-blue);
+        border-bottom: 1px solid var(--line);
+        font-size: 14px;
+        letter-spacing: 0;
+      }
+
+      .block:nth-child(2) h3 { background: var(--soft-teal); }
+      .block:nth-child(3) h3 { background: var(--soft-coral); }
+
+      .block textarea {
+        min-height: 112px;
+        border: 0;
+        border-radius: 0;
+        background: white;
+      }
+
+      .flags {
+        margin: 0;
+        padding: 0;
+        display: grid;
+        gap: 8px;
+        list-style: none;
+      }
+
+      .flags li {
+        padding: 9px 10px;
+        border: 1px solid #e8d59a;
+        border-radius: 8px;
+        color: #604710;
+        background: #fff6d6;
+        line-height: 1.5;
+        font-size: 14px;
+      }
+
+      .message {
+        min-height: 22px;
+        color: var(--muted);
+        line-height: 1.6;
+        font-size: 14px;
+      }
+
+      .message.error { color: var(--coral); }
+      .message.ok { color: var(--green); }
+
+      .privacy {
+        padding: 12px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        color: var(--muted);
+        background: #fbfdfd;
+        line-height: 1.6;
+        font-size: 13px;
+      }
+
+      @media (max-width: 900px) {
+        main { grid-template-columns: 1fr; }
+        .topbar { align-items: flex-start; flex-direction: column; }
+        .status { width: 100%; text-align: left; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <header>
+        <div class="topbar">
+          <div class="brand">
+            <h1>Iris</h1>
+            <p class="subtitle">正畸复诊病历助手</p>
+          </div>
+          <div id="status" class="status">正在连接本地服务</div>
+        </div>
+      </header>
+
+      <main>
+        <section>
+          <div class="section-head">
+            <h2>复诊要点</h2>
+            <button id="voiceButton" class="secondary" type="button">开始语音</button>
+          </div>
+          <div class="content">
+            <div>
+              <label for="notes">医生输入</label>
+              <textarea id="notes" placeholder="例如：口卫一般，33 到 43 排齐改善，更换 0.019x0.025 不锈钢方丝，继续 II 类牵引，下次复查咬合。"></textarea>
+            </div>
+            <div class="controls">
+              <button id="generateButton" type="button">生成病历</button>
+              <button id="clearButton" class="secondary" type="button">清空</button>
+            </div>
+            <div class="privacy">
+              Iris 只整理医生输入，不替代诊断。使用云端 AI 时，请避免输入身份证、电话等不必要的敏感信息。
+            </div>
+            <div id="inputMessage" class="message"></div>
+          </div>
+        </section>
+
+        <section>
+          <div class="section-head">
+            <h2>病历预览</h2>
+            <div class="controls">
+              <button id="fillButton" class="blue" type="button" disabled>填入 E看牙</button>
+              <button id="saveButton" class="gold" type="button" disabled>询问保存</button>
+            </div>
+          </div>
+          <div class="content">
+            <div class="preview">
+              <div class="block">
+                <h3>检查</h3>
+                <textarea id="examText"></textarea>
+              </div>
+              <div class="block">
+                <h3>处置</h3>
+                <textarea id="treatmentText"></textarea>
+              </div>
+              <div class="block">
+                <h3>医嘱</h3>
+                <textarea id="adviceText"></textarea>
+              </div>
+            </div>
+            <ul id="flags" class="flags"></ul>
+            <div id="outputMessage" class="message"></div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const state = { record: null, recognizing: false, recognition: null };
+
+      function setMessage(id, text, type = "") {
+        const el = $(id);
+        el.textContent = text || "";
+        el.className = `message ${type}`.trim();
+      }
+
+      function currentRecordFromPreview() {
+        return {
+          examination: $("examText").value.trim(),
+          treatment: $("treatmentText").value.trim(),
+          advice: $("adviceText").value.trim(),
+          flags: [...$("flags").querySelectorAll("li")].map((li) => li.textContent)
+        };
+      }
+
+      async function postJson(url, payload) {
+        const response = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload || {})
+        });
+        const data = await response.json();
+        if (!response.ok || data.ok === false) {
+          throw new Error(data.message || "操作失败。");
+        }
+        return data;
+      }
+
+      async function checkHealth() {
+        try {
+          const response = await fetch("/api/health", { cache: "no-store" });
+          const data = await response.json();
+          $("status").textContent = data.ok ? "Iris 已就绪" : "Iris 未就绪";
+        } catch {
+          $("status").textContent = "Iris 本地服务未连接";
+        }
+      }
+
+      function renderRecord(record) {
+        state.record = record;
+        $("examText").value = record.examination || "";
+        $("treatmentText").value = record.treatment || record.current || "";
+        $("adviceText").value = record.advice || "";
+        $("flags").innerHTML = "";
+        (record.flags || []).forEach((flag) => {
+          const li = document.createElement("li");
+          li.textContent = flag;
+          $("flags").appendChild(li);
+        });
+        $("fillButton").disabled = false;
+        $("saveButton").disabled = true;
+      }
+
+      async function generateRecord() {
+        const notes = $("notes").value.trim();
+        if (!notes) {
+          setMessage("inputMessage", "请先输入复诊要点。", "error");
+          return;
+        }
+        $("generateButton").disabled = true;
+        setMessage("inputMessage", "正在生成病历。");
+        setMessage("outputMessage", "");
+        try {
+          const data = await postJson("/api/generate", { notes });
+          renderRecord(data.record);
+          const source = data.record.source === "ai" ? "云端 AI" : "本地模板";
+          setMessage("inputMessage", `已生成，来源：${source}。`, "ok");
+        } catch (error) {
+          setMessage("inputMessage", error.message, "error");
+        } finally {
+          $("generateButton").disabled = false;
+        }
+      }
+
+      async function fillEkanya() {
+        $("fillButton").disabled = true;
+        setMessage("outputMessage", "正在填入 E看牙页面。");
+        try {
+          const data = await postJson("/api/fill", { record: currentRecordFromPreview() });
+          setMessage("outputMessage", data.message || "已填入，请审核。", "ok");
+          $("saveButton").disabled = false;
+        } catch (error) {
+          setMessage("outputMessage", error.message, "error");
+        } finally {
+          $("fillButton").disabled = false;
+        }
+      }
+
+      async function confirmSave() {
+        $("saveButton").disabled = true;
+        setMessage("outputMessage", "正在等待医生确认。");
+        try {
+          const data = await postJson("/api/confirm-save", {});
+          setMessage("outputMessage", data.message || "保存确认已完成。", data.saved ? "ok" : "");
+        } catch (error) {
+          setMessage("outputMessage", error.message, "error");
+        } finally {
+          $("saveButton").disabled = false;
+        }
+      }
+
+      function setupVoice() {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRecognition) {
+          $("voiceButton").disabled = true;
+          $("voiceButton").textContent = "语音不可用";
+          return;
+        }
+        const recognition = new SpeechRecognition();
+        recognition.lang = "zh-CN";
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        state.recognition = recognition;
+        let finalText = "";
+        recognition.onresult = (event) => {
+          let interim = "";
+          for (let i = event.resultIndex; i < event.results.length; i += 1) {
+            const text = event.results[i][0].transcript;
+            if (event.results[i].isFinal) finalText += text + "，";
+            else interim += text;
+          }
+          $("notes").value = (finalText + interim).trim();
+        };
+        recognition.onstart = () => {
+          state.recognizing = true;
+          $("voiceButton").textContent = "停止语音";
+          setMessage("inputMessage", "正在听写。");
+        };
+        recognition.onend = () => {
+          state.recognizing = false;
+          $("voiceButton").textContent = "开始语音";
+          if ($("notes").value.trim()) setMessage("inputMessage", "语音已停止，可继续编辑。", "ok");
+        };
+        recognition.onerror = (event) => {
+          setMessage("inputMessage", `语音识别失败：${event.error}`, "error");
+        };
+        $("voiceButton").addEventListener("click", () => {
+          if (state.recognizing) recognition.stop();
+          else {
+            finalText = $("notes").value.trim();
+            if (finalText && !/[，。；;,\s]$/.test(finalText)) finalText += "，";
+            recognition.start();
+          }
+        });
+      }
+
+      $("generateButton").addEventListener("click", generateRecord);
+      $("fillButton").addEventListener("click", fillEkanya);
+      $("saveButton").addEventListener("click", confirmSave);
+      $("clearButton").addEventListener("click", () => {
+        $("notes").value = "";
+        renderRecord({ examination: "", treatment: "", advice: "", flags: [] });
+        $("fillButton").disabled = true;
+        $("saveButton").disabled = true;
+        setMessage("inputMessage", "");
+        setMessage("outputMessage", "");
+      });
+
+      setupVoice();
+      checkHealth();
+    </script>
+  </body>
+</html>

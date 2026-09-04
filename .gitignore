@@ -1,0 +1,32 @@
+# Python runtime
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Iris runtime and local diagnostics
+logs/
+*.log
+iris-last-error.txt
+
+# Local secrets and overrides
+.env
+.env.*
+*.secret
+secrets/
+local-config.json
+
+# Browser/extension local state and packaged output
+chrome-profile/
+*.crx
+*.zip
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# E看牙 local dependency is outside this repository. If copied here, never track it.
+EKanYa AutoLogin/
+EKanYa-AutoLogin/
