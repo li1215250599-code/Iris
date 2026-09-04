@@ -2,6 +2,14 @@
 
 > 规则：以后每项记录日期、Agent、目的、重要文件、验证结果和遗留问题。没有 Git 历史时，不推断作者或确切修改时间。
 
+## 2026-09-04 — Hermes Agent — 头侧片识别仅保留视觉模型（移除 Windows OCR 回退）
+
+- 目的：医生实测后要求不再使用 Windows OCR——它会静默丢失负号并填入错误数值（如 Wits 2.6），且此前"负号仍错"症状实为服务未重启、仍在跑旧 Windows OCR 路径所致。
+- 变更：`iris_server.py` 移除 `/api/ceph-ocr` 的 Windows OCR 回退，改为视觉模型 + 3 次自动重试 + 全部失败显式报错（绝不静默填错）；`Start-Iris.ps1` 用户环境导入列表新增 `IRIS_CEPH_MODEL`（此前缺失会导致该变量无法传入服务进程）。视觉调用对 DeepSeek 关闭 thinking 并把 `max_tokens` 提到 2000（实测发现 vision-exp 思考会耗尽 800 配额导致 content 为空）。
+- 业务代码：`iris_server.py`、`Start-Iris.ps1`；复诊文字 AI 不受影响。
+- 验证：`py_compile` 通过；关闭 thinking + max_tokens=2000 后真实截图连跑 4 次全部返回 `Wits -2.6`（负号正确，零空返回）；生产路径 POST 回归见提交后实测。
+- 遗留：视觉 API 偶发空返回（已重试兜底，概率低）；识别结果仍需医生核对。
+
 ## 2026-09-04 — Hermes Agent — 头侧片识别改用 DeepSeek 视觉模型
 
 - 目的：解决 Windows OCR 对测量值小数点/负号识别不准的问题。

@@ -62,10 +62,10 @@
 
 **约束**：不要轻易改为全局 CSS 或网页 DOM 污染；布局调整要同时测试初诊和复诊面板的定位。
 
-## D-010：头侧片识别改用 AI 视觉模型（2026-09-04 医生授权）
+## D-010：头侧片识别使用 AI 视觉模型（2026-09-04 医生授权，仅视觉）
 
-**现状**：`/api/ceph-ocr` 优先调用视觉模型——模型取 `IRIS_CEPH_MODEL`（已设 `deepseek-v4-flash-vision-exp`），未设时回退 `IRIS_AI_MODEL`，key/baseUrl 复用 `IRIS_AI_API_KEY`/`IRIS_AI_BASE_URL`；视觉调用失败自动回退本机 Windows OCR。复诊文字 AI 仍用 `IRIS_AI_MODEL`（`deepseek-v4-flash`），两者互不影响。
+**现状**：`/api/ceph-ocr` 仅调用视觉模型——模型取 `IRIS_CEPH_MODEL`（=`deepseek-v4-flash-vision-exp`），未设时回退 `IRIS_AI_MODEL`；失败自动重试 3 次，全部失败则显式报错给医生。**不再回退 Windows OCR**（2026-09-04 医生实测后要求，因其负号识别不可靠且会静默填入错误数值）。复诊文字 AI 仍用 `IRIS_AI_MODEL`，两者互不影响。`Start-Iris.ps1` 已将 `IRIS_CEPH_MODEL` 纳入用户环境导入列表。
 
-**原因**：Windows OCR 对负数/小数点识别不稳定；视觉模型在合成测量表实测中精确保留正负号与小数。
+**原因**：视觉模型可精确保留负号与小数（真实截图实测 Wits -2.6 正确）；Windows OCR 在该版式上丢失负号。
 
-**约束**：头侧片截图（患者临床数据）会离开本机发送给 AI 提供商——这是对旧"图片不出本机"原则的有意反转，医生已明确授权。若日后撤换：删除用户环境变量 `IRIS_CEPH_MODEL` 并回退本段。识别结果仍需医生核对。
+**约束**：头侧片截图（患者临床数据）会离开本机发送给 AI 提供商——这是对旧"图片不出本机"原则的有意反转，医生已明确授权。识别结果仍需医生核对。若日后撤换：删除用户环境变量 `IRIS_CEPH_MODEL` 并回退本段。`local_windows_ocr`/`recover_ceph_value` 保留为历史能力，不再被任何路由调用。
