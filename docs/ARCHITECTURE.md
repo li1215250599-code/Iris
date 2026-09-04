@@ -5,7 +5,7 @@
 | 模块 | 文件 | 实际职责 |
 | --- | --- | --- |
 | 启动器 | `Run-Iris.cmd`, `Start-Iris.ps1` | 导入用户级 AI 环境变量、启动本地服务、可选调用 E看牙登录脚本。 |
-| 本地服务 | `iris_server.py` | HTTP API、本地规则、AI 调用、Windows OCR、术语读写、CDP 辅助接口。 |
+| 本地服务 | `iris_server.py` | HTTP API、本地规则、AI 调用、头侧片 AI 视觉识别、术语读写、CDP 辅助接口。 |
 | 扩展后台 | `chrome-extension/background.js` | 在内容脚本与 `127.0.0.1:9323` 之间转发生成、OCR、术语请求。 |
 | 内容脚本 | `chrome-extension/content.js` | 创建 Shadow DOM 浮窗、初诊模板、复诊 UI、语音、E看牙字段识别/填入、历史病历解析。 |
 | 样式 | `chrome-extension/panel.css` | Iris 面板和初诊模板的隔离样式。 |
@@ -66,9 +66,9 @@ flowchart TD
 | 方法 | 路径 | 调用者 | 作用 |
 | --- | --- | --- | --- |
 | GET | `/api/health` | 后台/启动器 | 健康检查。 |
-| GET/POST | `/api/terms` | 扩展后台 | 读取或更新术语映射。 |
+| GET/POST | `/api/terms` | 无 UI 调用（遗留） | 读取或更新术语映射；当前通过直接编辑 `terms.json` 维护。 |
 | POST | `/api/generate` | 扩展后台 | 复诊生成。 |
-| POST | `/api/ceph-ocr` | 扩展后台 | 本地头侧片截图 OCR。 |
+| POST | `/api/ceph-ocr` | 扩展后台 | 头侧片截图 AI 视觉识别（失败重试并显式报错）。 |
 | POST | `/api/fill` | 当前扩展未调用 | 服务端 CDP 后备填入接口；保留为历史/辅助能力。 |
 | POST | `/api/confirm-save` | 当前扩展未调用 | 服务端有确认后点击保存的实现；因临床边界，不能在 UI 中启用。 |
 

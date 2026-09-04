@@ -2,6 +2,14 @@
 
 > 规则：以后每项记录日期、Agent、目的、重要文件、验证结果和遗留问题。没有 Git 历史时，不推断作者或确切修改时间。
 
+## 2026-09-04 — Hermes Agent — 文档同步：修正过时的 OCR / 术语表描述
+
+- 目的：README 与架构/项目文档仍描述早已移除的“悬浮窗术语表”和已弃用的“本机 Windows OCR”，与实际代码脱节，会误导后续 Agent 与使用者。
+- 变更：`README.md`（能力描述改 AI 视觉识别、AI 配置补充 `IRIS_CEPH_MODEL`、术语表改为直接编辑 `terms.json`、安全边界补充“数据离本机”说明）；`chrome-extension/README.md`（第一版边界 → 当前初诊/复诊全字段能力）；`docs/ARCHITECTURE.md`（模块职责、`/api/terms` 标注无 UI 调用、`/api/ceph-ocr` 标注 AI 识别）；`docs/PROJECT.md`（场景三与已知边界）。
+- 业务代码：未修改。
+- 验证：逐条对照当前代码（content.js 无术语表 UI；`/api/ceph-ocr` 仅视觉模型）核实后修改。
+- 遗留：无。
+
 ## 2026-09-04 — Hermes Agent — 头侧片识别仅保留视觉模型（移除 Windows OCR 回退）
 
 - 目的：医生实测后要求不再使用 Windows OCR——它会静默丢失负号并填入错误数值（如 Wits 2.6），且此前"负号仍错"症状实为服务未重启、仍在跑旧 Windows OCR 路径所致。
