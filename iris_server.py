@@ -1151,6 +1151,66 @@ def describe_ai_error(exc):
     return f"{type(exc).__name__}: {str(exc)[:160]}"
 
 
+def call_ceph_vision_ocr(config, image_bytes, suffix):
+    """Read a cephalometric table screenshot with a vision-capable LLM.
+
+    Clinical decision D-010 (2026-09-04, doctor approved): cephalometric
+    screenshots may leave this machine and be sent to the configured AI
+    provider. On any error the caller falls back to local Windows OCR.
+    """
+    ai_config = config.get("ai") or {}
+    api_key = os.environ.get("IRIS_AI_API_KEY") or os.environ.get("OPENAI_API_KEY")
+    model = (os.environ.get("IRIS_CEPH_MODEL") or "").strip() or os.environ.get("IRIS_AI_MODEL") or ai_config.get("model")
+    base_url = (os.environ.get("IRIS_AI_BASE_URL") or ai_config.get("baseUrl") or "").rstrip("/")
+    if not api_key or not model or not base_url:
+        raise RuntimeError("未配置 AI 视觉模型：需要 IRIS_AI_API_KEY 与 IRIS_CEPH_MODEL（或 IRIS_AI_MODEL）。")
+
+    mime_types = {".png": "image/png", ".jpg": "image/jpeg", ".webp": "image/webp"}
+    mime = mime_types.get(suffix, "image/png")
+    data_url = f"data:{mime};base64,{base64.b64encode(image_bytes).decode('ascii')}"
+
+    system = (
+        "你是口腔正畸头影测量截图识别器，图片是头影测量分析表的截图。"
+        "请逐行识别表格中所有「项目名 数值」的数据行（例如：SNA 82.6、ANB -5.5、"
+        "Wits -0.99、MP-SN 32.0、U1-SN 108.3）。严格要求："
+        "数值必须保留原始正负号和全部小数位；项目名与数值之间用一个空格分隔；"
+        "单位（度、°、mm）可以省略；只输出这些数据行，不要任何解释、标题或代码块。"
+    )
+    body = {
+        "model": model,
+        "max_tokens": 800,
+        "temperature": 0,
+        "stream": False,
+        "messages": [
+            {"role": "system", "content": system},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": data_url}},
+                    {"type": "text", "text": "请识别这张头影测量表截图并输出全部项目数值行。"}
+                ]
+            }
+        ]
+    }
+    request = urllib.request.Request(
+        base_url + "/chat/completions",
+        data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Accept": "application/json",
+            "Content-Type": "application/json"
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=90) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    content = (payload.get("choices") or [{}])[0].get("message", {}).get("content", "")
+    content = str(content or "").strip()
+    if not re.search(r"[-+]?\d", content):
+        raise RuntimeError("视觉模型未返回可识别的数值行。")
+    return content
+
+
 class CdpWebSocket:
     def __init__(self, ws_url):
         parsed = urllib.parse.urlparse(ws_url)
@@ -1454,9 +1514,15 @@ class IrisHandler(BaseHTTPRequestHandler):
             if self.path == "/api/ceph-ocr":
                 payload = read_json_body(self)
                 image_bytes, suffix = decode_image_data_url(payload.get("imageData"))
-                text = local_windows_ocr(image_bytes, suffix)
-                log_event(self.config, f"ceph OCR completed chars={len(text)}")
-                response_json(self, 200, {"ok": True, "text": text})
+                source = "windows-ocr"
+                try:
+                    text = call_ceph_vision_ocr(self.config, image_bytes, suffix)
+                    source = "ai-vision"
+                except Exception as exc:
+                    log_event(self.config, f"ceph vision failed, falling back to Windows OCR: {describe_ai_error(exc)}")
+                    text = local_windows_ocr(image_bytes, suffix)
+                log_event(self.config, f"ceph OCR completed source={source} chars={len(text)}")
+                response_json(self, 200, {"ok": True, "text": text, "source": source})
                 return
             if self.path == "/api/fill":
                 payload = read_json_body(self)
