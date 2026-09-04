@@ -1,18 +1,27 @@
 # 当前交接
 
-最后审计：2026-09-04（Codex）
+最后更新：2026-09-04（Hermes Agent，GitHub 状态核查）
 
 ## 当前项目状态
 
 - Iris 可由 `Start-Iris.ps1` 启动；本地服务默认 `127.0.0.1:9323`。
 - Chrome 扩展以解压方式加载，匹配 `https://myourhis.myourchina.cn/*`。
-- 当前项目根目录是 `D:\DailyRootine\Iris`；审计开始时没有 Git 仓库、分支、提交或远端。
+- 当前项目根目录是 `D:\DailyRootine\Iris`；**已纳入 Git，远端为 private 仓库 `li1215250599-code/Iris`**。首个提交 `3903c52`（main）已推送，本地与远端同步。
 - 初诊和复诊功能都在 `chrome-extension/content.js`；复诊服务在 `iris_server.py`。
 - E看牙自动登录在相邻目录，不纳入 Iris Git 仓库。
+
+## Git 与认证（换 Agent / 换机器时先读）
+
+- 仓库必须保持 **private**，不得改 public（涉及临床文书工具）。
+- 本机（Windows 用户 1215）由 Git Credential Manager 托管 GitHub 凭据，账号 `li1215250599-code`；同一机器上的新 Agent 可直接 clone/push，无需重新认证。
+- 换机器时：需用账号 `li1215250599-code` 完成一次 GitHub 登录（gh auth login 或 GCM），或把新账号加为仓库 collaborator。
+- 提交身份已在仓库内配置（`li1215250599-code` / noreply 邮箱），无需全局配置。
+- 已提交内容仅含源码与文档；`logs/`、`__pycache__/`、Chrome profile、`.env` 等一律不入库。
 
 ## 最近完成的工作
 
 - 2026-09-04：建立多 Agent 协作文档和 Git 忽略规则；未改业务代码。
+- 2026-09-04（Hermes）：核查 GitHub 远端状态并同步本文件与 CHANGELOG；未改业务代码。
 - 2026-07-30（已知上下文）：ANB/Wits 的 OCR 补偿已添加并以一张截图验证；医生仍需核对值。
 
 ## 当前正在进行的工作
@@ -28,9 +37,7 @@
 
 ## 下一步建议
 
-先创建 private GitHub repository 前的本地首次提交：仅包含 Iris 源码、`AGENTS.md`、`docs/`、`.gitignore` 和 README；再次人工确认没有敏感文件被暂存。
-
-之后最合理的第一个开发任务是建立少量脱敏规则/OCR 回归样例和一键验证脚本。它能降低后续多个 Agent 修改临床规则或 OCR 时引入回归的风险，但不改变已有业务行为。
+GitHub 部分已完成（private 仓库 + 首次提交已推送 + 认证说明见上）。最合理的第一个开发任务是建立少量脱敏规则/OCR 回归样例和一键验证脚本：降低后续多个 Agent 修改临床规则或 OCR 时引入回归的风险，但不改变已有业务行为。之后可随时回到"按病历截图逐条加规则"的日常迭代。
 
 ## 修改时特别注意
 
