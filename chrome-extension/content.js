@@ -1242,6 +1242,13 @@
       if (closePanel) refs.panel.classList.remove("open");
     }
 
+    // 填入 E看牙 成功后立即收起悬浮窗（不重置草稿，state.record 保留，医生可随时点开回看）。
+    // 失败时不收起，让医生看到错误并原地修正。
+    // 后续点击「完成治疗」仍会 resetIrisDraft({closePanel:true})，用于跨患者清空草稿。
+    function closePanelAfterFill() {
+      refs.panel.classList.remove("open");
+    }
+
     function isFinishTreatmentClick(event) {
       if (host.contains(event.target)) return false;
       const clickable = event.target.closest?.("button, a, .btn, [role='button'], input[type='button'], input[type='submit']");
@@ -2207,6 +2214,7 @@
       try {
         const result = await fillEkanya();
         setStatus(result.message, result.ok ? "ok" : "error");
+        if (result.ok) closePanelAfterFill();
       } catch (error) {
         setStatus(error.message || "填入失败，请手动处理。", "error");
       } finally {
