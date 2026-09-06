@@ -2,6 +2,14 @@
 
 > 规则：以后每项记录日期、Agent、目的、重要文件、验证结果和遗留问题。没有 Git 历史时，不推断作者或确切修改时间。
 
+## 2026-09-06 — Hermes Agent — 填入 E看牙 成功后立即收起悬浮窗
+
+- 目的：医生要求点击「填入 E看牙」成功后悬浮窗自动收起，不必等到点击「完成治疗」才关闭，减少每例复诊一次多余的点按。
+- 变更：`chrome-extension/content.js` 新增 `closePanelAfterFill()`；`refs.fill` 点击处理在 `fillEkanya()` 返回 `result.ok` 后调用它移除 `.open`。**只收起不重置草稿**——`state.record`、要点文本与已填字段都保留，医生随时点开 Iris 悬浮钮即可回看/编辑/再次填入；填入失败或抛错时**不收起**，保留错误状态供原地修正。原「完成治疗」触发的 `resetIrisDraft({closePanel:true})` 保留，仍负责跨患者清空草稿。
+- 业务代码：`chrome-extension/content.js`；`chrome-extension/manifest.json` 版本 0.1.25 → 0.1.26；`iris_server.py` 未修改。
+- 验证：`node --check content.js background.js`、`python -m py_compile iris_server.py` 全部通过（ALL_OK）。面板显隐只依赖 `.iris-panel.open` 类（`display:none` → `display:grid`），移除类即收起；`positionLauncherFromPanel()`/`repositionPanelAfterLayout()` 在拖拽与重开时重新定位，收起态无残留副作用。
+- 遗留：需医生在真实 E看牙编辑页刷新页面（重新加载未打包扩展后刷新）人工确认——成功填入后窗口收起且悬浮钮可重新点开；失败路径仍保持展开。
+
 ## 2026-09-04 — Hermes Agent — 文档同步：修正过时的 OCR / 术语表描述
 
 - 目的：README 与架构/项目文档仍描述早已移除的“悬浮窗术语表”和已弃用的“本机 Windows OCR”，与实际代码脱节，会误导后续 Agent 与使用者。
