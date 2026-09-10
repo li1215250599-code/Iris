@@ -70,6 +70,14 @@
 
 **约束**：头侧片截图（患者临床数据）会离开本机发送给 AI 提供商——这是对旧"图片不出本机"原则的有意反转，医生已明确授权。识别结果仍需医生核对。若日后撤换：删除用户环境变量 `IRIS_CEPH_MODEL` 并回退本段。`local_windows_ocr`/`recover_ceph_value` 保留为历史能力，不再被任何路由调用。
 
+## D-012：GLM 双草稿使用 GLM-5.3-Flash 的低推理模式
+
+**现状**：双草稿影子提取在 Windows 用户变量 `IRIS_GLM_MODEL=glm-5.3-flash` 下调用。GLM-5.3 系列请求使用 `thinking.enabled`、`reasoning_effort=low` 与 4,096 token 预算；候选仍必须通过原文可追溯、JSON 结构与字段校验才会显示，且正负极性由 Iris 对原文的本地否定词确定。
+
+**原因**：GLM-5.3 的思考不可关闭。多要点结构化提取以 2,000 token 调用时会出现思考耗尽而正文为空；Flash 以低推理强度在虚构多要点用例中生成候选约 3 秒。
+
+**约束**：GLM 候选是可选建议，不得绕过本地候选、验证器、医生选择或人工保存边界。API key 只存于 Windows 用户环境变量，绝不写入扩展、日志、文档或 Git。
+
 ## D-011：填入成功后立即收起悬浮窗，但不清空草稿
 
 **现状**：`chrome-extension/content.js` 的 `refs.fill` 点击处理在 `fillEkanya()` 返回 `result.ok` 后调用 `closePanelAfterFill()` 移除 `.open` 类，窗口立即收起。**只收起、不重置**——`state.record`、复诊要点与已填字段全部保留；医生点 Iris 悬浮钮即可重新展开回看、编辑或再次填入。填入失败或抛错时不收起，保留错误状态供原地修正。原「完成治疗」触发的 `resetIrisDraft({closePanel:true})` 保留，负责跨患者清空草稿。
