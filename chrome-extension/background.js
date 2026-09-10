@@ -39,6 +39,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse(await postJson("/api/generate", { notes: message.notes || "" }));
       return;
     }
+    if (message?.type === "IRIS_GENERATE_DUAL_DRAFT") {
+      sendResponse(await postJson("/api/generate-dual-draft", { notes: message.notes || "" }));
+      return;
+    }
     if (message?.type === "IRIS_OCR_CEPH") {
       sendResponse(await postJson("/api/ceph-ocr", { imageData: message.imageData || "" }));
       return;

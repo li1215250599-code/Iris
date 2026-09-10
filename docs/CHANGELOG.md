@@ -2,6 +2,13 @@
 
 > 规则：以后每项记录日期、Agent、目的、重要文件、验证结果和遗留问题。没有 Git 历史时，不推断作者或确切修改时间。
 
+## 2026-09-10 — Hermes Agent — GLM 双草稿改用 GLM-5.3-Flash
+
+- 目的：复诊影子提取是窄范围结构化任务；GLM-5.3 的默认思考在多要点输入时耗尽 2,000 token 预算，返回空正文，导致界面仅显示本地候选。
+- 变更：`IRIS_GLM_MODEL` 设置为 `glm-5.3-flash`；`iris_server.py` 对 GLM-5.3 系列请求使用官方允许的 `thinking: enabled`、`reasoning_effort=low` 与 4,096 token 输出预算，其他 GLM 模型保持关闭 thinking。候选的极性由可追溯原文中的本地否定词确定，不再接受模型的极性标签；新增 validator 覆盖凭空牙位/颌别、缺失弓丝规格、错误字段/枚举和空事实数组；密钥仍只在 Windows 用户环境变量中保存。
+- 验证：虚构多要点 POST `/api/generate-dual-draft` 返回 `GLM_STATUS=ok`、`GLM_CANDIDATE=True`；GLM 双草稿离线回归 13/13 通过；服务侧既有回归 19/19 通过；`python -m py_compile iris_server.py` 通过。
+- 遗留：需 VM 审阅 diff；用户后续决定是否合并或继续真实病例抽样。
+
 ## 2026-09-06 — Hermes Agent — 填入 E看牙 成功后立即收起悬浮窗
 
 - 目的：医生要求点击「填入 E看牙」成功后悬浮窗自动收起，不必等到点击「完成治疗」才关闭，减少每例复诊一次多余的点按。
