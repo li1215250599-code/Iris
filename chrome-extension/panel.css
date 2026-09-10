@@ -167,6 +167,59 @@ input[type="checkbox"]:focus-visible {
   gap: 8px;
 }
 
+.iris-dual-draft {
+  margin-top: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.iris-dual-note {
+  padding: 8px;
+  border: 1px solid #9adce8;
+  border-radius: 7px;
+  color: #365563;
+  background: #f0fafc;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.iris-dual-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.iris-dual-card {
+  min-width: 0;
+  display: grid;
+  gap: 7px;
+  padding: 8px;
+  border: 1px solid #c7e8ef;
+  border-radius: 7px;
+  background: #fff;
+}
+
+.iris-dual-card h3 {
+  margin: 0;
+  color: #365563;
+  font-size: 12px;
+}
+
+.iris-candidate-text {
+  min-height: 110px;
+  max-height: 260px;
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #17262f;
+  font: 12px/1.55 "Microsoft YaHei", Arial, sans-serif;
+}
+
+@media (max-width: 560px) {
+  .iris-dual-grid { grid-template-columns: 1fr; }
+}
+
 .iris-mode-row {
   display: grid;
   grid-template-columns: 72px minmax(0, 1fr);

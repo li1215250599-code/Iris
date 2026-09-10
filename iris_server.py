@@ -1138,6 +1138,167 @@ def call_ai_generate(config, notes):
     return call_chat_completions(base_url, api_key, model, notes)
 
 
+class GlmDraftError(RuntimeError):
+    def __init__(self, status, message):
+        super().__init__(message)
+        self.status = status
+
+
+def get_glm_settings():
+    return {
+        "api_key": (os.environ.get("IRIS_GLM_API_KEY") or "").strip(),
+        "model": (os.environ.get("IRIS_GLM_MODEL") or "glm-5.2").strip(),
+        "base_url": (os.environ.get("IRIS_GLM_BASE_URL") or "https://open.bigmodel.cn/api/paas/v4").rstrip("/"),
+    }
+
+
+def build_glm_shadow_messages(notes):
+    normalized = normalize_notes(notes)
+    system = (
+        "你是 Iris 的正畸复诊影子提取器。只提取医生本次输入中明确或可验证术语归一化的事实。"
+        "绝不诊断、推测、补造牙位、颌别、材料、规格、牵引路径、处置或医嘱。"
+        "只输出 JSON 对象，不要 Markdown 或解释。facts.findings/procedures/instructions 中每项都必须含 raw、record_field、polarity、confidence。"
+        "raw 必须是输入中的直接连续片段；record_field 只能是 examination、treatment、advice；"
+        "polarity 只能是 positive 或 negative；confidence 只能是 explicit、normalized 或 uncertain。"
+        "输入缺失、冲突或含糊时，放入 uncertainties，不要写入 facts。未见、未处理、否认等否定词必须保持 negative。"
+    )
+    user = (
+        "按下列 JSON 结构返回，不得增加顶级字段："
+        '{"facts":{"findings":[],"procedures":[],"instructions":[]},"uncertainties":[],"safety_flags":[],"source_summary":""}。'
+        "uncertainties 每项必须含 raw、field、reason、question。\n"
+        f"医生输入：{normalized}"
+    )
+    return normalized, system, user
+
+
+def call_glm_structured_draft(notes):
+    settings = get_glm_settings()
+    if not settings["api_key"]:
+        raise GlmDraftError("not_configured", "GLM 未配置：请在本机运行 Set-IrisGLM.ps1 后重启 Iris。")
+    normalized, system, user = build_glm_shadow_messages(notes)
+    body = {
+        "model": settings["model"],
+        "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+        "response_format": {"type": "json_object"},
+        "max_tokens": 4096,
+        "stream": False,
+    }
+    if settings["model"].lower().startswith("glm-5.3"):
+        # GLM-5.3 does not support disabling thinking.  Keep it low for this
+        # narrowly-scoped extraction task so the final JSON has token budget.
+        body["thinking"] = {"type": "enabled"}
+        body["reasoning_effort"] = "low"
+    else:
+        body["thinking"] = {"type": "disabled"}
+    started = time.monotonic()
+    try:
+        response_payload = post_chat_with_curl(
+            settings["base_url"] + "/chat/completions", settings["api_key"], body
+        )
+    except RuntimeError as exc:
+        detail = str(exc)
+        status_match = re.search(r"HTTP status=(\d{3})", detail)
+        status = status_match.group(1) if status_match else "request_failed"
+        raise GlmDraftError(f"http_{status}", f"GLM 请求失败（{status}），本地草稿仍可使用。") from exc
+    except Exception as exc:
+        raise GlmDraftError("request_failed", "GLM 请求失败，本地草稿仍可使用。") from exc
+    content = str((response_payload.get("choices") or [{}])[0].get("message", {}).get("content") or "").strip()
+    if not content:
+        raise GlmDraftError("empty_response", "GLM 未返回候选内容，本地草稿仍可使用。")
+    try:
+        payload = json.loads(content)
+    except json.JSONDecodeError as exc:
+        raise GlmDraftError("invalid_json", "GLM 返回不是有效 JSON，候选已拒绝。") from exc
+    return payload, {"model": settings["model"], "elapsed_ms": round((time.monotonic() - started) * 1000), "protocol": "chat-completions-json"}
+
+
+def _require_string(value, label, allow_empty=False):
+    if not isinstance(value, str) or (not allow_empty and not value.strip()):
+        raise GlmDraftError("validation_failed", f"GLM 候选缺少或包含无效的 {label}，候选已拒绝。")
+    return value.strip()
+
+
+def _raw_is_traceable(raw, notes):
+    return raw in notes or raw in normalize_notes(notes)
+
+
+def validate_glm_facts(notes, payload):
+    if not isinstance(payload, dict) or set(payload) != {"facts", "uncertainties", "safety_flags", "source_summary"}:
+        raise GlmDraftError("validation_failed", "GLM 返回结构不符合影子模式契约，候选已拒绝。")
+    facts = payload.get("facts")
+    if not isinstance(facts, dict) or set(facts) != {"findings", "procedures", "instructions"}:
+        raise GlmDraftError("validation_failed", "GLM facts 结构无效，候选已拒绝。")
+    validated_facts = {name: [] for name in ("findings", "procedures", "instructions")}
+    has_nonempty_fact_group = False
+    negative_words = ("未见", "未处理", "否认", "无", "未佩戴", "未戴", "没有")
+    for name, entries in facts.items():
+        if not isinstance(entries, list):
+            raise GlmDraftError("validation_failed", "GLM facts 条目必须为数组，候选已拒绝。")
+        for entry in entries:
+            if not isinstance(entry, dict):
+                raise GlmDraftError("validation_failed", "GLM fact 条目无效，候选已拒绝。")
+            raw = _require_string(entry.get("raw"), "raw")
+            if not _raw_is_traceable(raw, notes):
+                raise GlmDraftError("validation_failed", "GLM 候选含有无法追溯到输入的事实，候选已拒绝。")
+            record_field = entry.get("record_field")
+            polarity = entry.get("polarity")
+            confidence = entry.get("confidence")
+            if record_field not in ("examination", "treatment", "advice") or polarity not in ("positive", "negative") or confidence not in ("explicit", "normalized", "uncertain"):
+                raise GlmDraftError("validation_failed", "GLM fact 的字段、极性或置信度无效，候选已拒绝。")
+            has_negative = any(word in raw for word in negative_words)
+            # raw has already been required to be a direct phrase from the
+            # clinician input. Derive polarity locally instead of trusting an
+            # LLM label, preventing either kind of polarity reversal.
+            polarity = "negative" if has_negative else "positive"
+            jaw = entry.get("jaw", "unspecified")
+            tooth = entry.get("tooth", "unspecified")
+            if jaw not in ("upper", "lower", "unspecified") or not isinstance(tooth, str):
+                raise GlmDraftError("validation_failed", "GLM fact 的颌别或牙位格式无效，候选已拒绝。")
+            if tooth != "unspecified" and tooth not in raw:
+                raise GlmDraftError("validation_failed", "GLM 候选牙位无法追溯到原始输入，候选已拒绝。")
+            if jaw == "upper" and not ("上颌" in raw or re.search(r"(?<!\d)[12]\d(?!\d)", raw)):
+                raise GlmDraftError("validation_failed", "GLM 候选上颌信息无法追溯到原始输入，候选已拒绝。")
+            if jaw == "lower" and not ("下颌" in raw or re.search(r"(?<!\d)[34]\d(?!\d)", raw)):
+                raise GlmDraftError("validation_failed", "GLM 候选下颌信息无法追溯到原始输入，候选已拒绝。")
+            if any(token in raw for token in ("不锈钢", "形状记忆", "NiTi", "NiTi")) and not re.search(r"(?<!\d)\d{4}(?!\d)", raw):
+                raise GlmDraftError("validation_failed", "GLM 候选弓丝材料缺少可追溯规格，候选已拒绝。")
+            validated_facts[name].append({"raw": raw, "record_field": record_field, "polarity": polarity, "confidence": confidence, "jaw": jaw, "tooth": tooth})
+            has_nonempty_fact_group = True
+    if not has_nonempty_fact_group:
+        raise GlmDraftError("validation_failed", "GLM 未返回可校验事实，候选已拒绝。")
+    uncertainties = payload.get("uncertainties")
+    if not isinstance(uncertainties, list):
+        raise GlmDraftError("validation_failed", "GLM uncertainties 必须为数组，候选已拒绝。")
+    validated_uncertainties = []
+    for item in uncertainties:
+        if not isinstance(item, dict):
+            raise GlmDraftError("validation_failed", "GLM uncertainty 条目无效，候选已拒绝。")
+        raw = _require_string(item.get("raw"), "uncertainty raw")
+        if not _raw_is_traceable(raw, notes):
+            raise GlmDraftError("validation_failed", "GLM uncertainty 无法追溯到输入，候选已拒绝。")
+        validated_uncertainties.append({key: _require_string(item.get(key), f"uncertainty {key}") for key in ("raw", "field", "reason", "question")})
+    safety_flags = payload.get("safety_flags")
+    if not isinstance(safety_flags, list) or not all(isinstance(item, str) and item.strip() for item in safety_flags):
+        raise GlmDraftError("validation_failed", "GLM safety_flags 格式无效，候选已拒绝。")
+    _require_string(payload.get("source_summary"), "source_summary", allow_empty=True)
+    return {"facts": validated_facts, "uncertainties": validated_uncertainties, "safety_flags": [item.strip() for item in safety_flags]}
+
+
+def render_glm_candidate(validated):
+    fields = {"examination": [], "treatment": [], "advice": []}
+    for entries in validated["facts"].values():
+        for entry in entries:
+            if entry["raw"] not in fields[entry["record_field"]]:
+                fields[entry["record_field"]].append(entry["raw"])
+    flags = list(validated["safety_flags"])
+    flags.extend(f"待确认：{item['question']}" for item in validated["uncertainties"])
+    flags.append("GLM 影子候选仅供医生审核；未被自动选中或填入。")
+    examination = "\n".join(fields["examination"])
+    treatment = "\n".join(fields["treatment"])
+    advice = "；".join(fields["advice"])
+    return {"source": "glm-shadow", "normalizedNotes": "", "examination": examination, "treatment": treatment, "advice": advice, "current": f"检查：{examination}\n处置：{treatment}".strip(), "nextPlan": "", "flags": flags}
+
+
 def describe_ai_error(exc):
     if isinstance(exc, urllib.error.HTTPError):
         detail = ""
@@ -1482,9 +1643,40 @@ class IrisHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         try:
+            if self.path == "/api/generate-dual-draft":
+                payload = read_json_body(self)
+                notes = str(payload.get("notes") or "").strip()
+                if not notes:
+                    raise ValueError("请先输入复诊要点。")
+                local_candidate = local_generate(notes)
+                glm_candidate = None
+                model_meta = {}
+                if local_candidate.get("template") == "retainer-followup":
+                    glm_status = {"code": "template_skipped", "message": "保持器复查固定模板优先，未调用 GLM。"}
+                else:
+                    try:
+                        glm_payload, model_meta = call_glm_structured_draft(notes)
+                        glm_candidate = render_glm_candidate(validate_glm_facts(notes, glm_payload))
+                        glm_status = {"code": "ok", "message": "GLM 候选已通过本地校验。"}
+                    except GlmDraftError as exc:
+                        glm_status = {"code": exc.status, "message": str(exc)}
+                        log_event(self.config, f"glm dual draft unavailable status={exc.status}")
+                    except Exception:
+                        glm_status = {"code": "request_failed", "message": "GLM 候选生成失败，本地草稿仍可使用。"}
+                        log_event(self.config, "glm dual draft unexpected failure")
+                response_json(self, 200, {
+                    "ok": True,
+                    "local_candidate": local_candidate,
+                    "glm_candidate": glm_candidate,
+                    "glm_status": glm_status,
+                    "model_meta": model_meta,
+                })
+                return
             if self.path == "/api/generate":
                 payload = read_json_body(self)
                 notes = str(payload.get("notes") or "").strip()
+                if not notes:
+                    raise ValueError("请先输入复诊要点。")
                 log_event(self.config, f"generate requested length={len(notes)}")
                 if is_retainer_followup_signal(notes):
                     record = retainer_followup_record(normalize_notes(notes))
