@@ -146,6 +146,57 @@ def test_validator_rejects_wrong_record_field():
     _reject("wrong record field", payload)
 
 
+def test_validator_reroutes_negative_finding_misrouted_to_treatment():
+    notes = "未见托槽脱落，今天未处理"
+    payload = valid_payload(notes)
+    payload["facts"]["findings"][0]["record_field"] = "treatment"
+    validated = iris_server.validate_glm_facts(notes, payload)
+    candidate = iris_server.render_glm_candidate(validated)
+    assert "未见托槽脱落" not in candidate["treatment"]
+    assert "未见托槽脱落" not in candidate["examination"]
+    assert any(item["raw"] == "未见托槽脱落" for item in validated["uncertainties"])
+    assert any("未见托槽脱落" in flag for flag in candidate["flags"])
+
+
+def test_validator_reroutes_treatment_misrouted_to_examination():
+    notes = "今天更换1725的不锈钢丝"
+    payload = {
+        "facts": {
+            "findings": [],
+            "procedures": [{"raw": notes, "record_field": "examination", "polarity": "positive", "confidence": "explicit", "jaw": "unspecified", "tooth": "unspecified"}],
+            "instructions": [],
+        },
+        "uncertainties": [],
+        "safety_flags": [],
+        "source_summary": "",
+    }
+    validated = iris_server.validate_glm_facts(notes, payload)
+    candidate = iris_server.render_glm_candidate(validated)
+    assert notes not in candidate["examination"]
+    assert notes not in candidate["treatment"]
+    assert any(item["raw"] == notes for item in validated["uncertainties"])
+
+
+def test_validator_keeps_consistent_local_routing():
+    notes = "上颌牙龈稍红肿，今天更换1725的不锈钢丝，继续挂皮筋"
+    payload = {
+        "facts": {
+            "findings": [{"raw": "上颌牙龈稍红肿", "record_field": "examination", "polarity": "positive", "confidence": "explicit", "jaw": "upper", "tooth": "unspecified"}],
+            "procedures": [{"raw": "今天更换1725的不锈钢丝", "record_field": "treatment", "polarity": "positive", "confidence": "explicit", "jaw": "unspecified", "tooth": "unspecified"}],
+            "instructions": [{"raw": "继续挂皮筋", "record_field": "advice", "polarity": "positive", "confidence": "explicit", "jaw": "unspecified", "tooth": "unspecified"}],
+        },
+        "uncertainties": [],
+        "safety_flags": [],
+        "source_summary": "",
+    }
+    validated = iris_server.validate_glm_facts(notes, payload)
+    candidate = iris_server.render_glm_candidate(validated)
+    assert not validated["uncertainties"]
+    assert "上颌牙龈稍红肿" in candidate["examination"]
+    assert "今天更换1725的不锈钢丝" in candidate["treatment"]
+    assert "继续挂皮筋" in candidate["advice"]
+
+
 def test_validator_rejects_unknown_enum():
     payload = valid_payload("未见托槽脱落，今天未处理")
     payload["facts"]["findings"][0]["confidence"] = "certain"
@@ -157,6 +208,15 @@ def test_validator_rejects_empty_fact_groups():
     payload["facts"]["findings"] = []
     payload["facts"]["procedures"] = []
     _reject("empty fact groups", payload)
+
+
+def test_default_model_is_the_validated_one():
+    original = os.environ.pop("IRIS_GLM_MODEL", None)
+    try:
+        assert iris_server.get_glm_settings()["model"] == "glm-5.3-flash"
+    finally:
+        if original is not None:
+            os.environ["IRIS_GLM_MODEL"] = original
 
 
 def test_dual_route_keeps_local_candidate_when_glm_not_configured():

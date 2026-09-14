@@ -5,6 +5,7 @@ Runs the same checks locally and on GitHub Actions:
   2. Repository JSON validity (terms.json, chrome-extension/manifest.json)
   3. Extension JS syntax check (node --check content.js background.js)
   4. Service-side offline regression (tests/service_regression.py)
+  5. GLM dual-draft offline regression (tests/glm_dual_draft_regression.py)
 
 Any failure returns a non-zero exit code. No network access, no live service
 startup, no external AI calls, no login state, no real E看牙 page access.
@@ -69,6 +70,11 @@ def main() -> int:
     rc = run([py, "tests/service_regression.py"], "Service-side offline regression")
     if rc != 0:
         failures.append(("python tests/service_regression.py", rc))
+
+    # 5. GLM dual-draft offline regression (validator, routing, fallback)
+    rc = run([py, "tests/glm_dual_draft_regression.py"], "GLM dual-draft offline regression")
+    if rc != 0:
+        failures.append(("python tests/glm_dual_draft_regression.py", rc))
 
     print()
     print(f"{HEAD}=== Verification summary ===\033[0m")

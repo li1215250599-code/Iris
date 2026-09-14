@@ -22,6 +22,9 @@ from pathlib import Path
 APP_DIR = Path(__file__).resolve().parent
 TERMS_PATH = APP_DIR / "terms.json"
 LOG_LOCK = threading.Lock()
+EXT_INPUT_LOG_PATH = APP_DIR / "logs" / "ext-input-events.log"
+EXT_INPUT_LOG_LOCK = threading.Lock()
+EXT_INPUT_LOG_MAX_LINES = 5000
 
 
 def load_config(path):
@@ -36,6 +39,34 @@ def log_event(config, message):
     with LOG_LOCK:
         with open(log_dir / "iris-server.log", "a", encoding="utf-8") as handle:
             handle.write(line)
+
+
+def append_ext_input_events(events):
+    # 扩展"黑匣子"：只接收事件类型/时间戳/计数等非内容字段，用于诊断页面
+    # 输入卡死（点击失效、滚轮可用类故障）。绝不写入输入文本或页面内容。
+    log_dir = APP_DIR / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+    safe = []
+    for item in events[:80]:
+        if not isinstance(item, dict):
+            continue
+        kind = str(item.get("kind") or "?")[:40]
+        note = str(item.get("note") or "")[:80]
+        safe.append(f"{kind}{' note=' + note if note else ''}")
+    line = f"[{stamp}] {' | '.join(safe)}\n" if safe else ""
+    if not line:
+        return
+    with EXT_INPUT_LOG_LOCK:
+        target = log_dir / "ext-input-events.log"
+        try:
+            if target.exists() and sum(1 for _ in target.open("rb")) > EXT_INPUT_LOG_MAX_LINES:
+                target.unlink()
+            with EXT_INPUT_LOG_PATH.open("a", encoding="utf-8") as handle:
+                handle.write(line)
+        except OSError:
+            # 诊断日志失败不得影响页面或服务；静默丢弃本批事件。
+            pass
 
 
 def response_json(handler, status, payload):
@@ -681,7 +712,12 @@ def is_aligner_followup_signal(text):
 
 
 def is_retainer_followup_signal(text):
-    return bool(re.search(r"\u4fdd\u6301\u5668\s*(?:\u590d\u67e5|\u590d\u8bca)|(?:\u590d\u67e5|\u590d\u8bca)\s*\u4fdd\u6301\u5668|\u4fdd\u6301\u590d\u67e5", text or "", re.IGNORECASE))
+    # 保持器复查固定模板信号：同一输入中同时出现"保持器"与"复查/复诊"即命中，
+    # 不要求相邻（如"戴保持器3个月，复查"）；仅出现"保持器"不命中，避免误入模板。
+    compact = text or ""
+    has_retainer = "保持器" in compact or "保持复查" in compact
+    has_followup = bool(re.search(r"复查|复诊", compact))
+    return has_retainer and has_followup
 
 
 def retainer_followup_record(notes):
@@ -1147,7 +1183,9 @@ class GlmDraftError(RuntimeError):
 def get_glm_settings():
     return {
         "api_key": (os.environ.get("IRIS_GLM_API_KEY") or "").strip(),
-        "model": (os.environ.get("IRIS_GLM_MODEL") or "glm-5.2").strip(),
+        # 默认必须是医院端实际连通并验证过的模型；改默认值前必须先完成连通性与
+        # 双草稿回归验证，防止重新运行配置脚本时回退到未验证模型。
+        "model": (os.environ.get("IRIS_GLM_MODEL") or "glm-5.3-flash").strip(),
         "base_url": (os.environ.get("IRIS_GLM_BASE_URL") or "https://open.bigmodel.cn/api/paas/v4").rstrip("/"),
     }
 
@@ -1222,6 +1260,25 @@ def _raw_is_traceable(raw, notes):
     return raw in notes or raw in normalize_notes(notes)
 
 
+# 本地字段归类信号：用于验证模型给出的 record_field 是否与 raw 的事实性质一致。
+# 只保留口语/病历中含义明确的信号，避免"磨牙""粘膜"这类跨类词误判。
+_RECORD_FIELD_SIGNALS = {
+    "examination": ("未见", "否认", "无压痛", "脱落", "松动", "红肿", "牙龈", "充血", "出血", "溃疡", "龋", "口腔卫生", "菌斑", "结石", "咬合", "覆合", "覆盖", "正常", "良好", "疼痛", "疼", "酸", "不适", "检查"),
+    "treatment": ("更换", "换了", "换上", "换", "粘接", "粘固", "重新粘", "粘贴", "调合", "调颌", "调磨", "抛光", "拆除", "剪断", "结扎", "冲洗", "上药", "加力", "拔除", "洁治", "处理", "放置"),
+    "advice": ("继续", "坚持", "避免", "少吃", "注意", "随诊", "按时", "挂皮筋"),
+}
+
+
+def infer_record_field(raw):
+    # 命中且仅命中一个类别的信号时给出可靠判定；无信号或多类混杂返回 None，
+    # 此时无法本地验证，保留模型的路由并交给医生审核。
+    text = raw or ""
+    matched = {name for name, tokens in _RECORD_FIELD_SIGNALS.items() if any(token in text for token in tokens)}
+    if len(matched) == 1:
+        return matched.pop()
+    return None
+
+
 def validate_glm_facts(notes, payload):
     if not isinstance(payload, dict) or set(payload) != {"facts", "uncertainties", "safety_flags", "source_summary"}:
         raise GlmDraftError("validation_failed", "GLM 返回结构不符合影子模式契约，候选已拒绝。")
@@ -1229,8 +1286,19 @@ def validate_glm_facts(notes, payload):
     if not isinstance(facts, dict) or set(facts) != {"findings", "procedures", "instructions"}:
         raise GlmDraftError("validation_failed", "GLM facts 结构无效，候选已拒绝。")
     validated_facts = {name: [] for name in ("findings", "procedures", "instructions")}
-    has_nonempty_fact_group = False
+    uncertainties = payload.get("uncertainties")
+    if not isinstance(uncertainties, list):
+        raise GlmDraftError("validation_failed", "GLM uncertainties 必须为数组，候选已拒绝。")
+    validated_uncertainties = []
+    for item in uncertainties:
+        if not isinstance(item, dict):
+            raise GlmDraftError("validation_failed", "GLM uncertainty 条目无效，候选已拒绝。")
+        raw = _require_string(item.get("raw"), "uncertainty raw")
+        if not _raw_is_traceable(raw, notes):
+            raise GlmDraftError("validation_failed", "GLM uncertainty 无法追溯到输入，候选已拒绝。")
+        validated_uncertainties.append({key: _require_string(item.get(key), f"uncertainty {key}") for key in ("raw", "field", "reason", "question")})
     negative_words = ("未见", "未处理", "否认", "无", "未佩戴", "未戴", "没有")
+    has_nonempty_fact_group = False
     for name, entries in facts.items():
         if not isinstance(entries, list):
             raise GlmDraftError("validation_failed", "GLM facts 条目必须为数组，候选已拒绝。")
@@ -1262,21 +1330,20 @@ def validate_glm_facts(notes, payload):
                 raise GlmDraftError("validation_failed", "GLM 候选下颌信息无法追溯到原始输入，候选已拒绝。")
             if any(token in raw for token in ("不锈钢", "形状记忆", "NiTi", "NiTi")) and not re.search(r"(?<!\d)\d{4}(?!\d)", raw):
                 raise GlmDraftError("validation_failed", "GLM 候选弓丝材料缺少可追溯规格，候选已拒绝。")
+            inferred = infer_record_field(raw)
+            if inferred is not None and inferred != record_field:
+                # 本地能可靠归类但与模型路由冲突：不进入候选正文，降级为待确认项。
+                validated_uncertainties.append({
+                    "raw": raw,
+                    "field": record_field,
+                    "reason": f"本地判定该内容应属于 {inferred}，与模型给出的 {record_field} 不一致",
+                    "question": f"“{raw}”应写入哪一栏？（本地判断：{inferred}）",
+                })
+                continue
             validated_facts[name].append({"raw": raw, "record_field": record_field, "polarity": polarity, "confidence": confidence, "jaw": jaw, "tooth": tooth})
             has_nonempty_fact_group = True
-    if not has_nonempty_fact_group:
+    if not has_nonempty_fact_group and not validated_uncertainties:
         raise GlmDraftError("validation_failed", "GLM 未返回可校验事实，候选已拒绝。")
-    uncertainties = payload.get("uncertainties")
-    if not isinstance(uncertainties, list):
-        raise GlmDraftError("validation_failed", "GLM uncertainties 必须为数组，候选已拒绝。")
-    validated_uncertainties = []
-    for item in uncertainties:
-        if not isinstance(item, dict):
-            raise GlmDraftError("validation_failed", "GLM uncertainty 条目无效，候选已拒绝。")
-        raw = _require_string(item.get("raw"), "uncertainty raw")
-        if not _raw_is_traceable(raw, notes):
-            raise GlmDraftError("validation_failed", "GLM uncertainty 无法追溯到输入，候选已拒绝。")
-        validated_uncertainties.append({key: _require_string(item.get(key), f"uncertainty {key}") for key in ("raw", "field", "reason", "question")})
     safety_flags = payload.get("safety_flags")
     if not isinstance(safety_flags, list) or not all(isinstance(item, str) and item.strip() for item in safety_flags):
         raise GlmDraftError("validation_failed", "GLM safety_flags 格式无效，候选已拒绝。")
@@ -1739,6 +1806,14 @@ class IrisHandler(BaseHTTPRequestHandler):
                 log_event(self.config, "confirm-save requested")
                 result = evaluate_on_ekanya(self.config, save_prompt_script())
                 response_json(self, 200, result if isinstance(result, dict) else {"ok": False, "message": "保存确认结果异常。"})
+                return
+            if self.path == "/api/ext-input-log":
+                payload = read_json_body(self)
+                events = payload.get("events")
+                if not isinstance(events, list):
+                    raise ValueError("events must be a list")
+                append_ext_input_events(events)
+                response_json(self, 200, {"ok": True})
                 return
             response_json(self, 404, {"ok": False, "message": "Not found"})
         except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:

@@ -1,5 +1,6 @@
 param(
-    [string]$Model = "glm-5.2",
+    # 默认为医院端实际连通并验证过的模型；如需更换必须先完成连通性与双草稿回归验证。
+    [string]$Model = "glm-5.3-flash",
     [string]$BaseUrl = "https://open.bigmodel.cn/api/paas/v4"
 )
 

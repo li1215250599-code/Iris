@@ -405,16 +405,20 @@ def test_generate_whitespace_only_returns_error():
 # local_generate rule regression tests
 # -----------------------------------------------------------------------------
 
-def test_local_retainer_signal_adjacent_only():
-    """Current routing behavior: 保持器 + 复查/复诊 必须相邻（或倒序）。
+def test_local_retainer_signal_matches_non_adjacent():
+    """保持器 + 复查/复诊 同现即命中，不要求相邻；仅"保持器"不命中。
 
-    Known gap: '戴保持器3个月，复查' is NOT routed to the retainer template
-    because 保持器 and 复查 are not adjacent. See KNOWN_GAPS report in main().
-    This test only verifies the ADJACENT cases still work.
+    Covers the former known gap: '戴保持器3个月，复查' now routes to the
+    retainer template instead of the AI/local general path.
     """
     assert iris_server.is_retainer_followup_signal("保持器复查")
     assert iris_server.is_retainer_followup_signal("复查保持器")
+    assert iris_server.is_retainer_followup_signal("保持器复查，继续维持")
+    assert iris_server.is_retainer_followup_signal("戴保持器3个月，复查")
+    assert iris_server.is_retainer_followup_signal("保持器3个月，这次复诊检查")
     assert not iris_server.is_retainer_followup_signal("戴保持器")
+    assert not iris_server.is_retainer_followup_signal("保持器边缘稍长，适合")
+    assert not iris_server.is_retainer_followup_signal("托槽脱落，复查")
 
 
 def test_local_wire_gauge_preserved():
