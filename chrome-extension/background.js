@@ -58,6 +58,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }));
       return;
     }
+    if (message?.type === "IRIS_INPUT_LOG") {
+      // 诊断黑匣子：仅事件类型/时间戳，无输入文本或页面内容。
+      sendResponse(await postJson("/api/ext-input-log", { events: message.events || [] }));
+      return;
+    }
     sendResponse({ ok: false, message: "未知 Iris 操作。" });
   })().catch((error) => {
     sendResponse({ ok: false, message: error.message || "Iris 操作失败。" });
