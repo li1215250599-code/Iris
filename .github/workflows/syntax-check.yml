@@ -1,7 +1,8 @@
 name: syntax-check
 
-# 每次推送到 main 或打开 PR 时,自动执行 AGENTS.md 中的人工验证命令,
-# 防止任何 Agent 提交语法损坏的文件。不运行业务逻辑、不接触临床数据。
+# 每次 push 到 main 或打开 PR 时运行 verify.py：语法检查 + 两套离线回归
+# （service_regression.py 与 glm_dual_draft_regression.py）。任何失败都会
+# 阻止 PR 合并。不运行业务逻辑、不接触临床数据、无网络外呼。
 
 on:
   push:
@@ -12,7 +13,7 @@ permissions:
   contents: read
 
 jobs:
-  syntax:
+  verify:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -21,15 +22,9 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Python syntax check
-        run: python -m py_compile iris_server.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
 
-      - name: JSON validity (terms / manifest)
-        run: |
-          python -m json.tool terms.json > /dev/null
-          python -m json.tool chrome-extension/manifest.json > /dev/null
-
-      - name: Extension JS syntax check
-        run: |
-          node --check chrome-extension/content.js
-          node --check chrome-extension/background.js
+      - name: Run unified offline verification (verify.py)
+        run: python verify.py

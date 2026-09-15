@@ -2,6 +2,26 @@
 
 > 规则：以后每项记录日期、Agent、目的、重要文件、验证结果和遗留问题。没有 Git 历史时，不推断作者或确切修改时间。
 
+## 2026-09-13 — Z Code — 修复 Phase 02 审阅阻塞项与填入按钮扫描卡顿
+
+- 目的：落实 VM 审阅（20260910-1255）的 4 项阻塞/高优先级意见；同时修复医生反馈的 E看牙 页面选中/拖拽时不时卡住的问题。
+- 变更：
+  - **BLOCKING-1**：`iris_server.py` 新增 `_RECORD_FIELD_SIGNALS` 与 `infer_record_field()`，本地按 raw 中的明确动作/检查/医嘱信号判定字段；与模型 `record_field` 冲突时不进候选正文，降级为 `uncertainties` 待确认项（同时计入 `render_glm_candidate` 的 flags）。validator 现允许"全部事实被降级但有待确认项"的载荷。
+  - **BLOCKING-2**：`is_retainer_followup_signal()` 改为"保持器"与"复查/复诊"同现即命中，不再要求相邻；仅出现"保持器"不命中。
+  - **HIGH-1**：`get_glm_settings()` 与 `Set-IrisGLM.ps1` 默认模型从 `glm-5.2` 改为医院端已验证的 `glm-5.3-flash`。
+  - **BLOCKING-3**：`verify.py` 第 5 项显式运行 `tests/glm_dual_draft_regression.py`；`.github/workflows/syntax-check.yml` 改为直接运行 `verify.py`（语法 + 两套回归，失败阻止 PR 合并）。
+  - **性能**：`chrome-extension/content.js` 填入按钮状态扫描改为按 URL 缓存 + 按需重扫（已命中 30s / 未命中编辑页 2.5s / 其他 6s），鼠标按住（选中/拖拽）与页面隐藏期间跳过，根除周期性全页 DOM 扫描造成的选中/拖拽卡顿。
+- 业务代码：`iris_server.py`、`chrome-extension/content.js`、`verify.py`、`.github/workflows/syntax-check.yml`、`Set-IrisGLM.ps1`、`tests/glm_dual_draft_regression.py`（13→17 条）、`tests/service_regression.py`（保持器信号断言更新，KNOWN_GAPS 自动转 RESOLVED）。
+- 验证：`verify.py` 全部通过（服务回归 19/19、双草稿回归 17/17、语法/JSON/JS 检查）；`git diff --check` 干净；敏感模式扫描无命中。
+- 遗留：真实 E看牙 页面"选用 GLM → 填入 → 不保存"链路仍待医生人工验证（`FILL_OK=False`）；选中文本卡顿修复待医生日常使用确认。
+
+## 2026-09-10 — Hermes Agent — GLM 双草稿改用 GLM-5.3-Flash
+
+- 目的：复诊影子提取是窄范围结构化任务；GLM-5.3 的默认思考在多要点输入时耗尽 2,000 token 预算，返回空正文，导致界面仅显示本地候选。
+- 变更：`IRIS_GLM_MODEL` 设置为 `glm-5.3-flash`；`iris_server.py` 对 GLM-5.3 系列请求使用官方允许的 `thinking: enabled`、`reasoning_effort=low` 与 4,096 token 输出预算，其他 GLM 模型保持关闭 thinking。候选的极性由可追溯原文中的本地否定词确定，不再接受模型的极性标签；新增 validator 覆盖凭空牙位/颌别、缺失弓丝规格、错误字段/枚举和空事实数组；密钥仍只在 Windows 用户环境变量中保存。
+- 验证：虚构多要点 POST `/api/generate-dual-draft` 返回 `GLM_STATUS=ok`、`GLM_CANDIDATE=True`；GLM 双草稿离线回归 13/13 通过；服务侧既有回归 19/19 通过；`python -m py_compile iris_server.py` 通过。
+- 遗留：需 VM 审阅 diff；用户后续决定是否合并或继续真实病例抽样。
+
 ## 2026-09-06 — Hermes Agent — 填入 E看牙 成功后立即收起悬浮窗
 
 - 目的：医生要求点击「填入 E看牙」成功后悬浮窗自动收起，不必等到点击「完成治疗」才关闭，减少每例复诊一次多余的点按。

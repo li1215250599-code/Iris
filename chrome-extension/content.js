@@ -13,6 +13,7 @@
     record: null,
     recognition: null,
     recognizing: false,
+    dualCandidates: null,
     finalSpeech: "",
     currentUrl: location.href
   };
@@ -77,9 +78,27 @@
           <div class="iris-row">
             <button id="iris-voice" class="iris-button ghost" type="button">开始语音</button>
             <button id="iris-generate" class="iris-button" type="button">生成病历</button>
+            <button id="iris-generate-dual" class="iris-button blue" type="button">生成并对比（GLM）</button>
             <button id="iris-clear" class="iris-button ghost" type="button">清空</button>
             <button id="iris-copy-notes" class="iris-button ghost" type="button">复制</button>
             <button id="iris-paste-notes" class="iris-button ghost" type="button">粘贴</button>
+          </div>
+          <div id="iris-dual-draft" class="iris-dual-draft" hidden>
+            <div class="iris-dual-note">请先比较两份候选，再主动选择一份进入下方可编辑草稿；不会自动填入 E看牙。</div>
+            <div class="iris-dual-grid">
+              <section class="iris-dual-card">
+                <h3>本地规则候选</h3>
+                <pre id="iris-local-candidate" class="iris-candidate-text"></pre>
+                <button id="iris-use-local" class="iris-button ghost" type="button">选用本地草稿</button>
+              </section>
+              <section class="iris-dual-card">
+                <h3>GLM 候选</h3>
+                <pre id="iris-glm-candidate" class="iris-candidate-text"></pre>
+                <div id="iris-glm-status" class="iris-inline-status"></div>
+                <ul id="iris-glm-flags" class="iris-flags"></ul>
+                <button id="iris-use-glm" class="iris-button ghost" type="button" disabled>选用 GLM 草稿</button>
+              </section>
+            </div>
           </div>
         </div>
 
@@ -310,6 +329,14 @@
       notes: $("#iris-notes"),
       voice: $("#iris-voice"),
       generate: $("#iris-generate"),
+      generateDual: $("#iris-generate-dual"),
+      dualDraft: $("#iris-dual-draft"),
+      localCandidate: $("#iris-local-candidate"),
+      glmCandidate: $("#iris-glm-candidate"),
+      glmStatus: $("#iris-glm-status"),
+      glmFlags: $("#iris-glm-flags"),
+      useLocal: $("#iris-use-local"),
+      useGlm: $("#iris-use-glm"),
       clear: $("#iris-clear"),
       copyNotes: $("#iris-copy-notes"),
       pasteNotes: $("#iris-paste-notes"),
@@ -453,7 +480,9 @@
         offsetX: 0,
         offsetY: 0,
         startX: 0,
-        startY: 0
+        startY: 0,
+        pointerId: null,
+        startedAt: 0
       };
 
       chrome.storage.local.get(["irisLauncherPosition", "irisPanelPosition"], (data) => {
@@ -483,9 +512,15 @@
         dragState.offsetY = event.clientY - rect.top;
         dragState.startX = event.clientX;
         dragState.startY = event.clientY;
+        dragState.pointerId = event.pointerId;
+        dragState.startedAt = Date.now();
         refs.panel.classList.add("dragging");
         refs.launcher.classList.add("dragging");
-        event.currentTarget.setPointerCapture?.(event.pointerId);
+        try {
+          event.currentTarget.setPointerCapture?.(event.pointerId);
+        } catch {
+          // 捕获失败时仅失去窗外跟手能力；window 级监听仍会跟踪拖拽与释放。
+        }
         event.preventDefault();
       }
 
@@ -513,18 +548,45 @@
         positionLauncherFromPanel();
       }
 
-      function endDrag(event) {
-        if (!dragState.active) return;
+      function releaseIrisPointerCapture(event) {
+        for (const el of [refs.launcher, refs.head]) {
+          try {
+            if (el.hasPointerCapture?.(event.pointerId)) el.releasePointerCapture(event.pointerId);
+          } catch {
+            // 指针已失效时忽略；捕获随指针生命周期自动结束。
+          }
+        }
+      }
+
+      function finishDrag(event) {
         const wasLauncherClick = dragState.mode === "launcher" && !dragState.moved;
         dragState.active = false;
+        dragState.pointerId = null;
+        dragState.startedAt = 0;
         refs.panel.classList.remove("dragging");
         refs.launcher.classList.remove("dragging");
-        event.currentTarget.releasePointerCapture?.(event.pointerId);
+        if (event) releaseIrisPointerCapture(event);
         saveLauncherPosition();
+        return wasLauncherClick;
+      }
+
+      function endDrag(event) {
+        // 即使 dragState 已复位也要尝试释放捕获：防止异常路径把页面指针长期扣留，
+        // 导致 E看牙 页面点击全部失效（滚轮可用、光标卡在文本选择状态）。
+        if (!dragState.active) {
+          releaseIrisPointerCapture(event);
+          return;
+        }
+        const wasLauncherClick = finishDrag(event);
         if (wasLauncherClick) {
           refs.panel.classList.toggle("open");
           if (refs.panel.classList.contains("open")) repositionPanelAfterLayout();
         }
+      }
+
+      function cancelStuckDrag() {
+        if (!dragState.active) return;
+        finishDrag(null);
       }
 
       refs.launcher.addEventListener("pointerdown", (event) => beginDrag(event, "launcher"));
@@ -535,6 +597,30 @@
       refs.head.addEventListener("pointermove", moveDrag);
       refs.head.addEventListener("pointerup", endDrag);
       refs.head.addEventListener("pointercancel", endDrag);
+      // 兜底：无论捕获把事件重定向到哪个元素，window 级监听都能结束拖拽并释放捕获。
+      window.addEventListener("pointerup", (event) => {
+        if (dragState.active) endDrag(event);
+      });
+      window.addEventListener("pointercancel", (event) => {
+        if (dragState.active) endDrag(event);
+      });
+      window.addEventListener("blur", cancelStuckDrag);
+      document.addEventListener("visibilitychange", () => {
+        if (document.hidden) cancelStuckDrag();
+      });
+      // 医生应急恢复键：点击失效时按 Esc 强制释放 Iris 扣留的指针捕获。
+      document.addEventListener("keydown", (event) => {
+        if (event.key !== "Escape") return;
+        if (dragState.active) cancelStuckDrag();
+        else if (dragState.pointerId !== null) {
+          releaseIrisPointerCapture({ pointerId: dragState.pointerId });
+          dragState.pointerId = null;
+        }
+      }, true);
+      // 看门狗：正常拖拽不会超过 30 秒，超时强制释放。
+      setInterval(() => {
+        if (dragState.active && Date.now() - dragState.startedAt > 30000) cancelStuckDrag();
+      }, 3000);
       window.addEventListener("resize", () => {
         applyLauncherPosition(launcherPosition());
         positionPanelFromLauncher();
@@ -1106,6 +1192,45 @@
       refs.copy.disabled = true;
     }
 
+    function hideDualDraft() {
+      refs.dualDraft.hidden = true;
+      refs.localCandidate.textContent = "";
+      refs.glmCandidate.textContent = "";
+      refs.glmStatus.textContent = "";
+      refs.glmFlags.innerHTML = "";
+      refs.useGlm.disabled = true;
+      state.dualCandidates = null;
+    }
+
+    function candidateText(record) {
+      return formatRecord(record) + ((record.flags || []).length ? `\n\n【提示】\n${record.flags.join("\n")}` : "");
+    }
+
+    function renderDualDraft(data) {
+      state.dualCandidates = { local: data.local_candidate, glm: data.glm_candidate || null };
+      refs.localCandidate.textContent = candidateText(data.local_candidate);
+      refs.glmCandidate.textContent = data.glm_candidate ? candidateText(data.glm_candidate) : "未生成可选 GLM 草稿。";
+      refs.glmStatus.textContent = data.glm_status?.message || "GLM 状态未知。";
+      refs.glmFlags.innerHTML = "";
+      for (const flag of (data.glm_candidate?.flags || [])) {
+        const li = document.createElement("li");
+        li.textContent = flag;
+        refs.glmFlags.appendChild(li);
+      }
+      refs.useGlm.disabled = !data.glm_candidate;
+      refs.dualDraft.hidden = false;
+      state.record = null;
+      clearOutputFields();
+      repositionPanelAfterLayout();
+    }
+
+    function selectDualCandidate(kind) {
+      const record = state.dualCandidates?.[kind];
+      if (!record) return;
+      renderRecord(record);
+      setStatus(kind === "glm" ? "已选用 GLM 候选；请继续审核编辑后再主动填入 E看牙。" : "已选用本地规则候选；请继续审核编辑后再主动填入 E看牙。", "ok");
+    }
+
     function syncVisitMode() {
       const initial = refs.visitMode.value === "initial";
       refs.followupForm.hidden = initial;
@@ -1114,6 +1239,7 @@
       refs.initialPreviewExtra.hidden = !initial;
       refs.panel.classList.toggle("initial-mode", initial);
       refs.title.textContent = initial ? "Iris 正畸初诊病历助手" : "Iris 正畸复诊病历助手";
+      hideDualDraft();
       repositionPanelAfterLayout();
       state.record = null;
       clearOutputFields();
@@ -1235,6 +1361,7 @@
       if (state.recognition && state.recognizing) state.recognition.stop();
       state.record = null;
       state.finalSpeech = "";
+      hideDualDraft();
       refs.notes.value = "";
       if (refs.visitMode.value === "initial") resetInitialForm();
       else clearOutputFields();
@@ -1255,6 +1382,98 @@
       if (!clickable) return false;
       const text = (clickable.innerText || clickable.textContent || clickable.value || clickable.title || "").replace(/\s+/g, "");
       return text === "完成治疗";
+    }
+
+    // “填入”按钮状态扫描：整页 DOM 扫描代价高（body * + innerText 强制布局），
+    // 必须缓存结果并按需重扫，避免周期性长任务卡住医生的选中/拖拽操作。
+    const fillScan = {
+      url: null,
+      result: false,
+      lastScan: 0,
+      pointerDown: false,
+      pointerDownAt: 0
+    };
+
+    function setupFillScanInteractionGuard() {
+      document.addEventListener("pointerdown", () => {
+        fillScan.pointerDown = true;
+        fillScan.pointerDownAt = Date.now();
+      }, true);
+      const releasePointer = () => {
+        fillScan.pointerDown = false;
+      };
+      document.addEventListener("pointerup", releasePointer, true);
+      document.addEventListener("pointercancel", releasePointer, true);
+      // 按键在窗口外释放时页面收不到 pointerup，靠失焦兜底复位。
+      window.addEventListener("blur", releasePointer);
+    }
+
+    function fillScanDue(now) {
+      const url = location.href;
+      if (url !== fillScan.url) return true;
+      const retryAfterMs = fillScan.result ? 30000 : (isEmrEditPage() ? 2500 : 6000);
+      return now - fillScan.lastScan >= retryAfterMs;
+    }
+
+    // 输入事件黑匣子：只记录事件类型、时间戳与整数坐标，绝不记录输入文本、
+    // 选区内容或页面内容。用于诊断"点击失效/滚轮可用"类输入卡死：下次复现时
+    // 读取 logs/ext-input-events.log 即可还原卡住前浏览器实际收到的事件序列。
+    function setupInputEventRecorder() {
+      const buffer = [];
+      const MAX_EVENTS = 40;
+      let lastSelectionLog = 0;
+
+      function record(kind, note) {
+        try {
+          if (buffer.length >= 200) buffer.shift();
+          buffer.push({ t: Date.now(), kind, note: note || "" });
+          if (buffer.length >= MAX_EVENTS) flush("batch");
+        } catch {
+          // 记录失败不影响页面。
+        }
+      }
+
+      function flush(reason) {
+        try {
+          if (!buffer.length) return;
+          const events = buffer.splice(0, buffer.length);
+          events.push({ t: Date.now(), kind: "flush", note: reason });
+          chrome.runtime.sendMessage({ type: "IRIS_INPUT_LOG", events }, () => {
+            void chrome.runtime.lastError;
+          });
+        } catch {
+          // 服务不可达时静默丢弃，避免堆积。
+        }
+      }
+
+      document.addEventListener("pointerdown", (event) => {
+        record("pointerdown", `btn=${event.button} cx=${Math.round(event.clientX)} cy=${Math.round(event.clientY)}`);
+      }, true);
+      document.addEventListener("pointerup", (event) => {
+        record("pointerup", `btn=${event.button} cx=${Math.round(event.clientX)} cy=${Math.round(event.clientY)}`);
+      }, true);
+      document.addEventListener("pointercancel", () => record("pointercancel"), true);
+      document.addEventListener("dragstart", () => record("dragstart"), true);
+      document.addEventListener("drop", () => record("drop"), true);
+      document.addEventListener("selectionchange", () => {
+        const now = Date.now();
+        if (now - lastSelectionLog < 1000) return;
+        lastSelectionLog = now;
+        record("selectionchange");
+      }, true);
+      document.addEventListener("keydown", (event) => {
+        // 只记控制类按键名；不记文本键，避免任何病历内容进入日志。
+        if (["Escape", "Enter", "Tab", "Backspace", "Delete", "Shift", "Control", "Alt"].includes(event.key)) {
+          record("keydown", event.key);
+        }
+      }, true);
+      window.addEventListener("blur", () => record("window-blur"));
+      window.addEventListener("focus", () => record("window-focus"));
+      document.addEventListener("visibilitychange", () => record(document.hidden ? "page-hidden" : "page-visible"));
+      window.addEventListener("beforeunload", () => flush("unload"));
+      setInterval(() => {
+        if (buffer.length) flush("timer");
+      }, 30000);
     }
 
     function setupAutoResetAfterFinish() {
@@ -2116,12 +2335,32 @@
       setStatus("正在生成病历。");
       try {
         const data = await sendToIris({ type: "IRIS_GENERATE", notes });
+        hideDualDraft();
         renderRecord(data.record);
         setStatus("病历已生成，可编辑后填入 E看牙。", "ok");
       } catch (error) {
         setStatus(error.message, "error");
       } finally {
         refs.generate.disabled = false;
+      }
+    }
+
+    async function generateDualDraft() {
+      const notes = refs.notes.value.trim();
+      if (!notes) {
+        setStatus("请先输入复诊要点。", "error");
+        return;
+      }
+      refs.generateDual.disabled = true;
+      setStatus("正在生成本地与 GLM 候选草稿。");
+      try {
+        const data = await sendToIris({ type: "IRIS_GENERATE_DUAL_DRAFT", notes });
+        renderDualDraft(data);
+        setStatus("候选已生成；请主动选择并审核一份草稿后再填入 E看牙。", "ok");
+      } catch (error) {
+        setStatus(error.message || "双草稿生成失败。", "error");
+      } finally {
+        refs.generateDual.disabled = false;
       }
     }
 
@@ -2183,6 +2422,9 @@
     refs.scrollBottom.addEventListener("click", () => refs.body.scrollTo({ top: refs.body.scrollHeight, behavior: "smooth" }));
     refs.visitMode.addEventListener("change", syncVisitMode);
     refs.generate.addEventListener("click", generate);
+    refs.generateDual.addEventListener("click", generateDualDraft);
+    refs.useLocal.addEventListener("click", () => selectDualCandidate("local"));
+    refs.useGlm.addEventListener("click", () => selectDualCandidate("glm"));
     refs.initialGenerate.addEventListener("click", generateInitial);
     refs.initialClear.addEventListener("click", () => {
       resetInitialForm();
@@ -2387,14 +2629,29 @@
     setupIrisDrag();
     setupAutoResetAfterFinish();
     setupVoice();
+    setupFillScanInteractionGuard();
+    setupInputEventRecorder();
     syncPageVisibility();
     setInterval(() => {
-      const enabled = !!state.record && canFillCurrentPage();
-      refs.fill.disabled = !enabled;
       if (state.currentUrl !== location.href) {
         state.currentUrl = location.href;
         syncPageVisibility();
       }
+      if (!state.record) {
+        fillScan.url = null;
+        fillScan.result = false;
+        refs.fill.disabled = true;
+        return;
+      }
+      if (document.hidden) return;
+      const now = Date.now();
+      // 鼠标按住（选择/拖拽）期间跳过扫描；松开后下一轮补扫。
+      if (fillScan.pointerDown && now - fillScan.pointerDownAt < 10000) return;
+      if (!fillScanDue(now)) return;
+      fillScan.result = canFillCurrentPage();
+      fillScan.url = location.href;
+      fillScan.lastScan = now;
+      refs.fill.disabled = !fillScan.result;
     }, 1500);
   }
 
